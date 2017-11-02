@@ -1,22 +1,28 @@
 class ToursController < ApplicationController
   before_action :set_tour, only: [:show, :edit, :update, :destroy, :copy_tour]
+
   before_action :authenticate_user!, :except => [:show]
-  before_filter :check_if_admin, only: [:index, :new, :create, :update, :destroy, :copy_tour]
-  
-  def check_if_admin
-    
+  before_filter :check_if_super_admin, only: [:new, :edit, :index]
+  before_filter :check_if_organizer_admin, only: [:create, :update, :destroy, :copy_tour]
+
+  skip_before_action :authenticate_user!, if: :json_request?
+  skip_before_action :check_if_super_admin, if: :json_request?, only: [:index]
+
+  before_filter :scoped_index, only: [:index]
+
+  def scoped_index
     allowed_emails = [Rails.application.secrets[:admin_email], Rails.application.secrets[:admin_email_alt]]
-    
-    unless allowed_emails.include? current_user.email
-      flash[:notice] = t('tours_controller_notice_one')
-      redirect_to root_url
-    end 
+    if current_user
+      @tours = allowed_emails.include?(current_user.email) ? Tour.all : Tour.publisheds
+    else
+      @tours = Tour.publisheds
+    end
   end
 
   def confirm
     @tour = Tour.find(params[:id])
     @packagename = params[:packagename]
-    
+
     if @tour.value
       @final_price = @tour.value
     else
@@ -28,7 +34,7 @@ class ToursController < ApplicationController
         @final_price = @package.value
       else
         @final_price = ""
-      end      
+      end
     end
     @marketplace = @tour.organizer.try(:marketplace)
     if @marketplace
@@ -39,7 +45,7 @@ class ToursController < ApplicationController
     end
 
   end
-  
+
   def confirm_presence
     @payment_type = params[:payment_type]
     if @payment_type == 'external'
@@ -48,7 +54,7 @@ class ToursController < ApplicationController
       confirm_direct(params)
     end
   end
-  
+
   def confirm_presence_alt
     @confirm_headline_message = t('tours_controller_confirm_headline_msg_two')
     @confirm_status_message = t('tours_controller_confirm_status_msg')
@@ -60,7 +66,7 @@ class ToursController < ApplicationController
     @payment_method = "CREDIT_CARD"
     render 'confirm_presence'
   end
-  
+
   def unconfirm_presence
     @tour = Tour.find(params[:id])
     @order = current_user.orders.where(:tour => @tour).first
@@ -77,7 +83,7 @@ class ToursController < ApplicationController
   # GET /tours
   # GET /tours.json
   def index
-    @tours = Tour.publisheds
+    
   end
 
   # GET /tours/1
@@ -102,6 +108,7 @@ class ToursController < ApplicationController
     @tour = Tour.new(tour_params)
     respond_to do |format|
       if @tour.save
+        OrganizerMailer.notify_followers(@tour).deliver_now if (@tour.status == "P")
         format.html { redirect_to @tour, notice: t('tours_controller_create_notice_one') }
         format.json { render :show, status: :created, location: @tour }
       else
@@ -122,6 +129,7 @@ class ToursController < ApplicationController
   def update
     respond_to do |format|
       if @tour.update(tour_params)
+        OrganizerMailer.notify_followers(@tour).deliver_now if (@tour.status == "P")
         format.html { redirect_to @tour, notice: t('tours_controller_update_notice') }
         format.json { render :show, status: :ok, location: @tour }
       else
@@ -139,17 +147,28 @@ class ToursController < ApplicationController
   def copy_tour
     organizer = @tour.organizer
 
+    old_wheres = @tour.wheres
+    old_packages = @tour.packages
     old_tour = @tour
+
     new_tour = Tour.new(old_tour.attributes.merge({:title => "#{@tour.title} - copiado", :status => '', :id => ''}))
+
+    new_tour.wheres << old_wheres
+
+    if old_packages.present?
+      new_tour.packages << old_packages
+    end
 
     respond_to do |format|
       if new_tour.save
         format.html {
-          redirect_to "/organizers/#{organizer.to_param}/guided_tour", flash: {success: t('tours_controller_copy_success')}
+          redirect_to "/organizers/#{organizer.to_param}/guided_tour", flash: {notice: t('tours_controller_copy_success')}
         }
         format.json { render :copy_tour, status: :ok, location: @tour }
       else
         format.html {
+          puts 'copy tour error'
+          puts new_tour.errors.inspect
           redirect_to "/organizers/#{organizer.to_param}/guided_tour", flash: {notice: t('tours_controller_copy_error')}
         }
         format.json { render json: @tour.errors, status: :unprocessable_entity }
@@ -170,16 +189,31 @@ class ToursController < ApplicationController
       format.json { head :no_content }
     end
   end
+
+  protected
+  def json_request?
+    request.format.json?
+  end
+  
+  def check_if_admin
+
+    allowed_emails = [Rails.application.secrets[:admin_email], Rails.application.secrets[:admin_email_alt]]
+
+    unless allowed_emails.include? current_user.email
+      flash[:notice] = t('tours_controller_notice_one')
+      redirect_to root_url
+    end
+  end
   
   private
   # Use callbacks to share common setup or constraints between actions.
   def set_tour
     @tour = Tour.find(params[:id])
   end
-  
+
   # Never trust parameters from the scary internet, only allow the white list through.
   def tour_params
-    
+
     split_val = ";"
     organizer = params[:tour][:organizer_id] || params[:tour][:organizer]
 
@@ -193,7 +227,7 @@ class ToursController < ApplicationController
         params[:tour][:organizer] = new_organizer
       end
     end
-    
+
     if params[:tour][:tags] == "" or params[:tour][:tags].nil?
       params[:tour][:tags] = []
     else
@@ -204,7 +238,7 @@ class ToursController < ApplicationController
       end
       params[:tour][:tags] = tags
     end
-    
+
     if params[:tour][:languages] == "" or params[:tour][:languages].nil?
       params[:tour][:languages] = []
     else
@@ -216,17 +250,19 @@ class ToursController < ApplicationController
       params[:tour][:languages] = langs
     end
     
-    pkg_attr = params[:tour][:packages]
-    
+    pkg_attr = params[:tour][:packages_attributes]
+
     if !pkg_attr.nil?
-      post_data = []
       pkg_attr.each do |p|
-        included_array = p[1]["included"].split(split_val)
-        post_data.push Package.create(name: p[1]["name"], value: p[1]["value"], percent: p[1]["percent"], description: p[1]["description"], included: included_array)
+        included_array = p[1]["included"].split(split_val) rescue nil
+        if included_array
+          params[:tour][:packages_attributes][p[0]][:included] = included_array
+        else
+          params[:tour][:packages_attributes][p[0]][:included] = []
+        end
       end
-      params[:tour][:packages] = post_data        
     end
-    
+
     if params[:tour][:included] == "" or params[:tour][:included].nil?
       params[:tour][:included] = []
     else
@@ -237,7 +273,7 @@ class ToursController < ApplicationController
       end
       params[:tour][:included] = included
     end
-    
+
     if params[:tour][:nonincluded] == "" or params[:tour][:nonincluded].nil?
       params[:tour][:nonincluded] = []
     else
@@ -259,7 +295,7 @@ class ToursController < ApplicationController
       end
       params[:tour][:take] = take
     end
-    
+
     if params[:tour][:goodtoknow] == "" or params[:tour][:goodtoknow].nil?
       params[:tour][:goodtoknow] = []
     else
@@ -270,7 +306,7 @@ class ToursController < ApplicationController
       end
       params[:tour][:goodtoknow] = goodtoknow
     end
-    
+
     #current_where = params[:tour][:wheres_attributes][0]
 
     #if current_where
@@ -294,10 +330,10 @@ class ToursController < ApplicationController
         params[:tour][:category] = Category.find_or_create_by(name: current_category)
       end
     end
-    
+
     params[:tour][:attractions] = []
     params[:tour][:currency] = "BRL"
-    
+
     #params.fetch(:tour, {}).permit(:title, :organizer_id, :status, {:packages => [:name, :value, :included]}, {:packages_attributes => [:name, :value, :included]}, {:where_attributes => [:name, :place_id, :background_id, :lat, :long, :city, :state, :country, :postal_code, :address, :google_id, :url]}, :user_id, :picture, :link, :address, :availability, :minimum, :maximum, :difficulty, :start, :end, :value, :description, {:included => []}, {:nonincluded => []}, {:take => []}, {:goodtoknow => []}, :meetingpoint, :category_id, :category, :tags, {:languages => []}, :organizer, :user, {:attractions => []}, :currency).merge(params[:tour])
     params.fetch(:tour, {}).permit!
   end
@@ -321,10 +357,10 @@ class ToursController < ApplicationController
       @amount = params[:amount].to_i
     end
 
-    if params[:final_price].nil? || params[:final_price].empty?
-      @final_price = @value
+    if @value && params[:value_chosen_by_user]
+      @final_price = @amount * @value
     else
-      @final_price = params[:final_price].to_i
+      @final_price = params[:final_price].try(:to_i) || @value
     end
 
     begin
@@ -492,10 +528,10 @@ class ToursController < ApplicationController
       @amount = params[:amount].to_i
     end
 
-    if params[:final_price].nil? || params[:final_price].empty?
-      @final_price = @value
+    if @value && params[:value_chosen_by_user]
+      @final_price = @amount * @value
     else
-      @final_price = params[:final_price].to_i
+      @final_price = params[:final_price].try(:to_i) || @value
     end
 
     @price_cents = (@final_price*100).to_i

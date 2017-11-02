@@ -35,6 +35,7 @@ Rails.application.routes.draw do
 
   get 'contacts/index'
   post 'contacts/send_form'
+  post 'contacts/send_message'
 
   get 'welcome/organizer', to: 'welcome#organizer', as: 'organizer_welcome'
   get 'welcome/user', to: 'welcome#user', as: 'user_welcome'
@@ -49,7 +50,12 @@ Rails.application.routes.draw do
   get 'new_webhook', to: 'orders#new_webhook'
   get 'redirect', to: 'marketplaces#redirect'
 
+  get 'flights/nearest_airports', to: 'flights#nearest_airports'
+
   get 'organizers/create_from_auth', to: 'organizers#create_from_auth', as: 'create_from_auth'
+  get 'organizers/invite', to: 'organizers#invite', as: 'invite'
+  get 'organizers/accept_invite/(:id)/(:token)', to: 'organizers#accept_invite', as: 'accept_invite'
+  post 'organizers/send_invite', to: 'organizers#send_invite', as: 'send_invite'
 
   resources :organizers do
     member do
@@ -98,10 +104,16 @@ Rails.application.routes.draw do
 
   devise_for :users, :controllers => {
       :registrations => "users/registrations",
-      :omniauth_callbacks => "users/omniauth_callbacks"
+      :omniauth_callbacks => "users/omniauth_callbacks",
+      :sessions => "users/sessions"
   }
 
-  resources :users
+  resources :users do
+    member do
+      get 'follow', to: 'users#follow'
+      get 'unfollow', to: 'users#unfollow'
+    end
+  end
 
   # The priority is based upon order of creation: first created -> highest priority.
   # See how all your routes lay out with "rake routes".

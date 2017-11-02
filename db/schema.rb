@@ -11,7 +11,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 20171015203318) do
+ActiveRecord::Schema.define(version: 20171029123111) do
 
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
@@ -175,6 +175,13 @@ ActiveRecord::Schema.define(version: 20171015203318) do
   end
 
   add_index "destinations", ["user_id"], name: "index_destinations_on_user_id", using: :btree
+
+  create_table "follows", force: :cascade do |t|
+    t.integer  "user_id"
+    t.integer  "organizer_id"
+    t.datetime "created_at",   null: false
+    t.datetime "updated_at",   null: false
+  end
 
   create_table "forms", force: :cascade do |t|
     t.string   "url"
@@ -464,6 +471,7 @@ ActiveRecord::Schema.define(version: 20171015203318) do
     t.string   "status"
     t.string   "policy",               default: [],                 array: true
     t.integer  "percent",              default: 3
+    t.string   "invite_token"
   end
 
   add_index "organizers", ["marketplace_id"], name: "index_organizers_on_marketplace_id", using: :btree
@@ -609,7 +617,7 @@ ActiveRecord::Schema.define(version: 20171015203318) do
     t.integer  "rating"
     t.integer  "value"
     t.string   "currency"
-    t.integer  "organizer_id",                      null: false
+    t.integer  "organizer_id",                         null: false
     t.datetime "start"
     t.datetime "end"
     t.string   "photo"
@@ -618,11 +626,11 @@ ActiveRecord::Schema.define(version: 20171015203318) do
     t.integer  "maximum"
     t.integer  "difficulty"
     t.string   "address"
-    t.integer  "user_id",                           null: false
-    t.text     "included",             default: [],              array: true
-    t.text     "nonincluded",          default: [],              array: true
-    t.text     "take",                 default: [],              array: true
-    t.text     "goodtoknow",           default: [],              array: true
+    t.integer  "user_id",                              null: false
+    t.text     "included",             default: [],                 array: true
+    t.text     "nonincluded",          default: [],                 array: true
+    t.text     "take",                 default: [],                 array: true
+    t.text     "goodtoknow",           default: [],                 array: true
     t.integer  "category_id"
     t.integer  "tag_id"
     t.integer  "attraction_id"
@@ -633,8 +641,8 @@ ActiveRecord::Schema.define(version: 20171015203318) do
     t.integer  "review_id"
     t.string   "verified"
     t.string   "status"
-    t.datetime "created_at",                        null: false
-    t.datetime "updated_at",                        null: false
+    t.datetime "created_at",                           null: false
+    t.datetime "updated_at",                           null: false
     t.string   "picture_file_name"
     t.string   "picture_content_type"
     t.integer  "picture_file_size"
@@ -642,6 +650,7 @@ ActiveRecord::Schema.define(version: 20171015203318) do
     t.integer  "reserved",             default: 0
     t.string   "link"
     t.boolean  "removed"
+    t.boolean  "value_chosen_by_user", default: false
   end
 
   add_index "tours", ["attraction_id"], name: "index_tours_on_attraction_id", using: :btree
